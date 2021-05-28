@@ -73,18 +73,27 @@ func (c *PAClient) recordUpdated(name string, present bool) {
 	}
 }
 
+// DeviceVolumeUpdated is called when the volume has changed on a device.
+func (c *PAClient) DeviceVolumeUpdated(path dbus.ObjectPath, values []uint32) {
+	log.Info().Msgf("one: device volume updated: %v %v", path, values)
+}
+
 var muteKeys = map[string]uint8{
-	"Focusrite Scarlett 2i2 2nd Gen Analog Stereo": 10,
 	"spotify":  1,
 	"Firefox":  4,
 	"Chromium": 7,
+	"Focusrite Scarlett 2i2 2nd Gen Analog Stereo": 10,
+	"Webcam C270 Mono":    13,
+	"Jabra Link 380 Mono": 16,
 }
 
 var recordKeys = map[string]uint8{
-	"Focusrite Scarlett 2i2 2nd Gen Analog Stereo": 12,
 	"spotify":  3,
 	"Firefox":  6,
 	"Chromium": 9,
+	"Focusrite Scarlett 2i2 2nd Gen Analog Stereo": 12,
+	"Webcam C270 Mono":    15,
+	"Jabra Link 380 Mono": 18,
 }
 
 func (c *PAClient) muteUpdated(name string, mute bool) {
@@ -164,6 +173,7 @@ func (c *PAClient) RefreshStreams() error {
 			return err
 		}
 
+		log.Info().Msgf("%v", props)
 		if applicationName, ok := props["application.name"]; ok {
 			if _, ok := recordStreamsByName[applicationName]; ok {
 				recordStreamsByName[applicationName] = append(recordStreamsByName[applicationName], streamPath)
@@ -237,6 +247,7 @@ func (c *PAClient) ProcessVolumeAction(action PulseAudioAction, volume float32) 
 	if action.TargetType == Source {
 		if sourcePaths, ok := c.sourcesByName[action.TargetName]; ok {
 			for _, sourcePath := range sourcePaths {
+				log.Info().Msgf("set volume %v: %v", sourcePath, newVol)
 				objs = append(objs, c.Device(sourcePath))
 			}
 		}
@@ -260,7 +271,16 @@ func (c *PAClient) ProcessVolumeAction(action PulseAudioAction, volume float32) 
 
 	if len(objs) > 0 {
 		for _, obj := range objs {
-			err := obj.Set("Volume", []uint32{newVol, newVol})
+			vol := make([]uint32, 0)
+			if channels, err := obj.ListUint32("Channels"); err != nil {
+				log.Info().Msgf("couldn't get channels: %v", err)
+			} else {
+				for range channels {
+					vol = append(vol, newVol)
+				}
+			}
+
+			err := obj.Set("Volume", vol)
 			if err != nil {
 				return err
 			}
@@ -320,14 +340,8 @@ func (c *PAClient) ProcessMuteAction(action PulseAudioAction) error {
 
 	if len(objs) > 0 {
 		for _, obj := range objs {
-			var mute bool
-			err := obj.Get("Mute", &mute)
-			if err != nil {
-				return err
-			}
-
-			err = obj.Set("Mute", !mute)
-			if err != nil {
+			mute, _ := obj.Bool("Mute")
+			if err := obj.Set("Mute", !mute); err != nil {
 				return err
 			}
 		}
