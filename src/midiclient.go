@@ -5,6 +5,7 @@ import (
 	"gitlab.com/gomidi/midi"
 	"gitlab.com/gomidi/midi/midimessage/channel"
 	"gitlab.com/gomidi/midi/reader"
+	"gitlab.com/gomidi/midi/writer"
 	driver "gitlab.com/gomidi/portmididrv"
 )
 
@@ -13,6 +14,7 @@ type MidiClient struct {
 	MidiActions    []MidiAction
 	InputMidiName  string
 	OutputMidiName string
+	wr             *writer.Writer
 }
 
 func (c *MidiClient) ListDevices() ([]string, []string, error) {
@@ -48,7 +50,16 @@ func (c *MidiClient) ListDevices() ([]string, []string, error) {
 	return inNames, outNames, nil
 }
 
-func (c *MidiClient) Run() {
+func (c *MidiClient) LedOn(key uint8) {
+	writer.NoteOn(c.wr, key, 127)
+}
+
+func (c *MidiClient) LedOff(key uint8) {
+	// NOTE: strangely enough, writer.NoteOff(..) doesn't work?
+	c.wr.Write(writer.Channel(c.wr).NoteOff(key))
+}
+
+func (c *MidiClient) Run(initDone chan<- struct{}) {
 	drv, err := driver.New()
 	if err != nil {
 		panic(err)
@@ -95,9 +106,12 @@ func (c *MidiClient) Run() {
 	defer in.Close()
 	defer out.Close()
 
+	c.wr = writer.New(out)
+
 	rd := reader.New(
 		reader.NoLogger(),
 		reader.Each(func(pos *reader.Position, msg midi.Message) {
+			log.Info().Msgf("%v", msg)
 			switch midiMessage := msg.(type) {
 			case channel.ControlChange:
 				for _, action := range c.MidiActions {
@@ -117,11 +131,34 @@ func (c *MidiClient) Run() {
 
 					if action.Action.ActionType == VolumeChange {
 						if err := c.PAClient.ProcessVolumeAction(action.Action, perc); err != nil {
-							panic(err)
+							log.Error().Err(err)
 						}
 					}
 				}
 				log.Info().Msgf("Saw ControlChange input on Channel %d, Controller %d, with value %d", midiMessage.Channel(), midiMessage.Controller(), midiMessage.Value())
+
+			case channel.NoteOn:
+				// c.wr.Write(writer.Channel(c.wr).NoteOff(midiMessage.Key()))
+				for _, action := range c.MidiActions {
+					if action.ActionType != NoteOn {
+						continue
+					}
+
+					if action.Channel != midiMessage.Channel() {
+						continue
+					}
+
+					if action.Controller != midiMessage.Key() {
+						continue
+					}
+
+					if action.Action.ActionType == VolumeChange {
+						if err := c.PAClient.ProcessMuteAction(action.Action); err != nil {
+							log.Error().Err(err)
+						}
+					}
+				}
+				log.Info().Msgf("Saw MuteOn input on Channel %d, Key %d, with value %d", midiMessage.Channel(), midiMessage.Key(), midiMessage.Velocity())
 			}
 		}),
 	)
@@ -129,5 +166,7 @@ func (c *MidiClient) Run() {
 	if err != nil {
 		panic(err)
 	}
+
+	close(initDone)
 	rd.ListenTo(in)
 }

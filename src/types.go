@@ -4,6 +4,8 @@ type MidiActionType string
 
 const (
 	ControlChange MidiActionType = "ControlChange"
+	NoteOn                       = "NoteOn"
+	NoteOff                      = "NoteOff"
 )
 
 type PulseAudioActionType string

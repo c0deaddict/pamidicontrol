@@ -44,6 +44,8 @@ func Run() {
 		OutputMidiName: c.OutputMidiName,
 	}
 
+	paclient.midiClient = midiClient
+
 	if c.InputMidiName == "" || c.OutputMidiName == "" {
 		ins, outs, err := midiClient.ListDevices()
 		if err != nil {
@@ -58,7 +60,10 @@ func Run() {
 		os.Exit(1)
 	}
 
-	go midiClient.Run()
+	initDone := make(chan struct{})
+	go midiClient.Run(initDone)
+	<-initDone
+	paclient.UpdateRecordingLeds()
 
 	pulse.Listen()
 }
